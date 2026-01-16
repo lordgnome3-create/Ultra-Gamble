@@ -158,9 +158,9 @@ function UltraGambling_SlashCmd(msg)
 	end
 end
 
+SlashCmdList["ULTRAGAMBLING"] = UltraGambling_SlashCmd;
 SLASH_ULTRAGAMBLING1 = "/UltraGambler";
 SLASH_ULTRAGAMBLING2 = "/ug";
-SlashCmdList["ULTRAGAMBLING"] = UltraGambling_SlashCmd
 
 function UltraGambling_ParseChatMsg(arg1, arg2)
 	if (arg1 == "1") then
