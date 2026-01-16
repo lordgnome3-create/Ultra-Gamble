@@ -1,0 +1,10 @@
+## Interface: 11200
+## Title: UltraGamble
+## Notes: A gambling addon for organizing rolls in raid, guild, or party chat
+## Author: Your Name
+## Version: 1.0.0
+## SavedVariables: UltraGambling, UG_Settings
+## OptionalDeps:
+## Dependencies:
+
+UltraGamble.xml
