@@ -38,8 +38,8 @@ local function CreateMainFrame()
 	f:SetMovable(true)
 	f:EnableMouse(true)
 	f:SetBackdrop({
-		bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-		edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+		bgFile = "Interface/DialogFrame/UI-DialogBox-Background",
+		edgeFile = "Interface/DialogFrame/UI-DialogBox-Border",
 		tile = true, tileSize = 32, edgeSize = 32,
 		insets = { left = 11, right = 12, top = 12, bottom = 11 }
 	})
@@ -62,8 +62,8 @@ local function CreateMainFrame()
 	
 	-- Edit box backdrop
 	editbox:SetBackdrop({
-		bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
-		edgeFile = "Interface\\Common\\Common-Input-Border",
+		bgFile = "Interface/ChatFrame/ChatFrameBackground",
+		edgeFile = "Interface/Common/Common-Input-Border",
 		tile = true, edgeSize = 8, tileSize = 32,
 		insets = { left = 0, right = 0, top = 0, bottom = 0 }
 	})
@@ -132,18 +132,18 @@ local function CreateMinimapButton()
 	icon:SetWidth(20)
 	icon:SetHeight(20)
 	icon:SetPoint("CENTER", 0, 1)
-	icon:SetTexture("Interface\\Icons\\INV_Misc_Coin_01")
+	icon:SetTexture("Interface/Icons/INV_Misc_Coin_01")
 	
 	-- Border texture
 	local border = btn:CreateTexture("UG_MinimapButton_Border", "OVERLAY")
 	border:SetWidth(52)
 	border:SetHeight(52)
 	border:SetPoint("TOPLEFT")
-	border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
+	border:SetTexture("Interface/Minimap/MiniMap-TrackingBorder")
 	
 	-- Highlight
 	local highlight = btn:CreateTexture(nil, "HIGHLIGHT")
-	highlight:SetTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
+	highlight:SetTexture("Interface/Minimap/UI-Minimap-ZoomButton-Highlight")
 	highlight:SetBlendMode("ADD")
 	highlight:SetAllPoints()
 	
