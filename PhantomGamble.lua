@@ -622,6 +622,14 @@ local function CreateMainFrame()
 	rollBtn:SetText("Roll")
 	rollBtn:SetScript("OnClick", function() PhantomGamble_OnClickROLL() end)
 
+	local cancelBtn = CreateFrame("Button", "PhantomGamble_Cancel_Button", f, "GameMenuButtonTemplate")
+	cancelBtn:SetWidth(120)
+	cancelBtn:SetHeight(22)
+	cancelBtn:SetPoint("TOP", rollBtn, "BOTTOM", 0, -4)
+	cancelBtn:SetText("Cancel")
+	cancelBtn:SetScript("OnClick", function() PhantomGamble_OnClickCANCEL() end)
+	cancelBtn:Disable()
+
 	-- ==========================================
 	-- RIGHT SIDE - Death Roll
 	-- ==========================================
@@ -632,7 +640,7 @@ local function CreateMainFrame()
 
 	-- Starting number label and editbox
 	local drStartLabel = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-	drStartLabel:SetPoint("TOP", rightTitle, "BOTTOM", -35, -5)
+	drStartLabel:SetPoint("TOPRIGHT", rightTitle, "BOTTOM", -5, -8)
 	drStartLabel:SetText("|cffffffffStart:|r")
 	
 	local drEditbox = CreateFrame("EditBox", "PhantomGamble_DR_EditBox", f)
@@ -653,7 +661,7 @@ local function CreateMainFrame()
 
 	-- Gold wager label and editbox
 	local drGoldLabel = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-	drGoldLabel:SetPoint("TOP", drStartLabel, "BOTTOM", 0, -8)
+	drGoldLabel:SetPoint("TOPRIGHT", drStartLabel, "BOTTOMRIGHT", 0, -8)
 	drGoldLabel:SetText("|cffffd700Gold:|r")
 	
 	local drGoldEditbox = CreateFrame("EditBox", "PhantomGamble_DR_GoldEditBox", f)
@@ -978,6 +986,7 @@ function PhantomGamble_OnClickACCEPTONES()
 		PhantomGamble_AcceptOnes_Button:Enable()
 		PhantomGamble_ROLL_Button:Disable()
 		PhantomGamble_LASTCALL_Button:Disable()
+		PhantomGamble_Cancel_Button:Disable()
 		return
 	end
 	
@@ -986,6 +995,7 @@ function PhantomGamble_OnClickACCEPTONES()
 		PhantomGamble_Reset()
 		PhantomGamble_ROLL_Button:Disable()
 		PhantomGamble_LASTCALL_Button:Disable()
+		PhantomGamble_Cancel_Button:Enable()
 		AcceptOnes = "true"
 		ChatMsg("Welcome to PhantomGamble! Roll Amount: " .. editText .. " gold. Type 1 to Join or -1 to withdraw.")
 		PhantomGamble["lastroll"] = editText
@@ -1012,6 +1022,22 @@ function PhantomGamble_OnClickROLL()
 	elseif AcceptOnes == "true" then
 		ChatMsg("Not enough Players!")
 	end
+end
+
+function PhantomGamble_OnClickCANCEL()
+	if AcceptOnes == "true" or AcceptRolls == "true" then
+		ChatMsg("Gambling session has been cancelled.")
+	end
+	
+	PhantomGamble_Reset()
+	PhantomGamble_AcceptOnes_Button:SetText("Open Entry")
+	PhantomGamble_AcceptOnes_Button:Enable()
+	PhantomGamble_ROLL_Button:Disable()
+	PhantomGamble_LASTCALL_Button:Disable()
+	PhantomGamble_Cancel_Button:Disable()
+	PhantomGamble_CHAT_Button:Enable()
+	
+	Print("", "", "Gambling cancelled.")
 end
 
 function PhantomGamble_OnClickCHAT()
@@ -1059,6 +1085,7 @@ function PhantomGamble_Report()
 	PhantomGamble_AcceptOnes_Button:Enable()
 	PhantomGamble_ROLL_Button:Disable()
 	PhantomGamble_LASTCALL_Button:Disable()
+	PhantomGamble_Cancel_Button:Disable()
 	PhantomGamble_CHAT_Button:Enable()
 end
 
