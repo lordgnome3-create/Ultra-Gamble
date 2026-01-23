@@ -163,6 +163,7 @@ end
 
 local function RefreshStatsDisplay()
 	if not PhantomGamble_StatsFrame or not PhantomGamble_StatsFrame:IsVisible() then return end
+	if not PhantomGamble_StatsScrollChild then return end
 	
 	if statsNeedUpdate then UpdateSortedStats() end
 	
@@ -171,6 +172,12 @@ local function RefreshStatsDisplay()
 		if statsLines[i] then
 			statsLines[i]:Hide()
 		end
+	end
+	
+	-- Get scroll child width
+	local childWidth = PhantomGamble_StatsScrollChild:GetWidth()
+	if not childWidth or childWidth <= 0 then
+		childWidth = 240
 	end
 	
 	-- Show stats
@@ -182,12 +189,13 @@ local function RefreshStatsDisplay()
 		if not line then
 			line = PhantomGamble_StatsScrollChild:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 			line:SetJustifyH("LEFT")
+			line:SetWidth(childWidth - 10)
 			statsLines[i] = line
 		end
 		
 		line:ClearAllPoints()
 		line:SetPoint("TOPLEFT", PhantomGamble_StatsScrollChild, "TOPLEFT", 5, -yOffset)
-		line:SetPoint("TOPRIGHT", PhantomGamble_StatsScrollChild, "TOPRIGHT", -5, -yOffset)
+		line:SetWidth(childWidth - 10)
 		
 		local color
 		if entry.amount > 0 then
@@ -205,9 +213,31 @@ local function RefreshStatsDisplay()
 		yOffset = yOffset + STATS_LINE_HEIGHT
 	end
 	
+	-- If no stats, show message
+	if table.getn(sortedStats) == 0 then
+		local line = statsLines[1]
+		if not line then
+			line = PhantomGamble_StatsScrollChild:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+			line:SetJustifyH("LEFT")
+			statsLines[1] = line
+		end
+		line:ClearAllPoints()
+		line:SetPoint("TOPLEFT", PhantomGamble_StatsScrollChild, "TOPLEFT", 5, 0)
+		line:SetText("|cffffff00No gambling stats yet.|r")
+		line:Show()
+		yOffset = STATS_LINE_HEIGHT
+	end
+	
 	-- Update scroll child height
-	local totalHeight = math.max(yOffset, 100)
+	local totalHeight = math.max(yOffset + 10, 50)
 	PhantomGamble_StatsScrollChild:SetHeight(totalHeight)
+	
+	-- Update scroll bar range
+	if PhantomGamble_StatsScrollBar then
+		local visibleHeight = PhantomGamble_StatsScrollFrame:GetHeight()
+		local maxScroll = math.max(0, totalHeight - visibleHeight)
+		PhantomGamble_StatsScrollBar:SetMinMaxValues(0, maxScroll)
+	end
 end
 
 local function CreateStatsWindow()
@@ -274,38 +304,54 @@ local function CreateStatsWindow()
 	closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -2, -2)
 	closeBtn:SetScript("OnClick", function() PhantomGamble_StatsFrame:Hide() end)
 	
-	-- Scroll frame
+	-- Scroll frame - create with explicit size
 	local scrollFrame = CreateFrame("ScrollFrame", "PhantomGamble_StatsScrollFrame", f)
 	scrollFrame:SetPoint("TOPLEFT", f, "TOPLEFT", 10, -30)
 	scrollFrame:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -30, 60)
+	scrollFrame:EnableMouseWheel(true)
 	
-	-- Scroll child
+	-- Scroll child - must be created and sized before setting as scroll child
 	local scrollChild = CreateFrame("Frame", "PhantomGamble_StatsScrollChild", scrollFrame)
-	scrollChild:SetWidth(scrollFrame:GetWidth())
-	scrollChild:SetHeight(400)
+	scrollChild:SetWidth(240)
+	scrollChild:SetHeight(1) -- Will be updated dynamically
+	
 	scrollFrame:SetScrollChild(scrollChild)
 	
 	-- Scroll bar
-	local scrollBar = CreateFrame("Slider", "PhantomGamble_StatsScrollBar", scrollFrame, "UIPanelScrollBarTemplate")
+	local scrollBar = CreateFrame("Slider", "PhantomGamble_StatsScrollBar", scrollFrame)
 	scrollBar:SetPoint("TOPLEFT", scrollFrame, "TOPRIGHT", 2, -16)
 	scrollBar:SetPoint("BOTTOMLEFT", scrollFrame, "BOTTOMRIGHT", 2, 16)
-	scrollBar:SetMinMaxValues(0, 400)
-	scrollBar:SetValueStep(STATS_LINE_HEIGHT)
-	scrollBar:SetValue(0)
 	scrollBar:SetWidth(16)
+	scrollBar:SetOrientation("VERTICAL")
+	scrollBar:SetMinMaxValues(0, 1)
+	scrollBar:SetValueStep(1)
+	scrollBar:SetValue(0)
+	
+	-- Scroll bar background
+	local scrollBg = scrollBar:CreateTexture(nil, "BACKGROUND")
+	scrollBg:SetAllPoints(scrollBar)
+	scrollBg:SetTexture(0, 0, 0, 0.5)
+	
+	-- Scroll bar thumb
+	local thumb = scrollBar:CreateTexture(nil, "OVERLAY")
+	thumb:SetTexture(0.5, 0.5, 0.5, 1)
+	thumb:SetWidth(14)
+	thumb:SetHeight(30)
+	scrollBar:SetThumbTexture(thumb)
+	
 	scrollBar:SetScript("OnValueChanged", function()
 		scrollFrame:SetVerticalScroll(this:GetValue())
 	end)
 	
 	-- Mouse wheel scrolling
-	scrollFrame:EnableMouseWheel(true)
 	scrollFrame:SetScript("OnMouseWheel", function()
 		local current = scrollBar:GetValue()
+		local minVal, maxVal = scrollBar:GetMinMaxValues()
 		local step = STATS_LINE_HEIGHT * 3
 		if arg1 > 0 then
-			scrollBar:SetValue(math.max(0, current - step))
+			scrollBar:SetValue(math.max(minVal, current - step))
 		else
-			scrollBar:SetValue(current + step)
+			scrollBar:SetValue(math.min(maxVal, current + step))
 		end
 	end)
 	
@@ -375,19 +421,30 @@ local function CreateStatsWindow()
 	resizeBtn:SetScript("OnMouseUp", function() 
 		PhantomGamble_StatsFrame:StopMovingOrSizing()
 		UpdateStatsWindowLayout()
-		-- Update scroll child width
-		PhantomGamble_StatsScrollChild:SetWidth(PhantomGamble_StatsScrollFrame:GetWidth())
+		local scrollWidth = PhantomGamble_StatsScrollFrame:GetWidth()
+		PhantomGamble_StatsScrollChild:SetWidth(scrollWidth)
 		RefreshStatsDisplay()
 	end)
 	
 	f:SetScript("OnSizeChanged", function() 
 		UpdateStatsWindowLayout()
-		PhantomGamble_StatsScrollChild:SetWidth(PhantomGamble_StatsScrollFrame:GetWidth())
+		local scrollWidth = PhantomGamble_StatsScrollFrame:GetWidth()
+		if scrollWidth and scrollWidth > 0 then
+			PhantomGamble_StatsScrollChild:SetWidth(scrollWidth)
+		end
 	end)
 	
 	f:SetScript("OnShow", function()
 		statsNeedUpdate = true
-		RefreshStatsDisplay()
+		-- Delay the refresh slightly to ensure frame is fully rendered
+		this:SetScript("OnUpdate", function()
+			this:SetScript("OnUpdate", nil)
+			local scrollWidth = PhantomGamble_StatsScrollFrame:GetWidth()
+			if scrollWidth and scrollWidth > 0 then
+				PhantomGamble_StatsScrollChild:SetWidth(scrollWidth)
+			end
+			RefreshStatsDisplay()
+		end)
 	end)
 	
 	f:Hide()
@@ -771,6 +828,16 @@ function PhantomGamble_OnClickWHISPERS()
 end
 
 function PhantomGamble_OnClickACCEPTONES()
+	-- If button says "New Game", reset everything first
+	if PhantomGamble_AcceptOnes_Button:GetText() == "New Game" then
+		PhantomGamble_Reset()
+		PhantomGamble_AcceptOnes_Button:SetText("Open Entry")
+		PhantomGamble_AcceptOnes_Button:Enable()
+		PhantomGamble_ROLL_Button:Disable()
+		PhantomGamble_LASTCALL_Button:Disable()
+		return
+	end
+	
 	local editText = PhantomGamble_EditBox:GetText()
 	if editText ~= "" and editText ~= "1" and tonumber(editText) then
 		PhantomGamble_Reset()
@@ -833,6 +900,9 @@ function PhantomGamble_Report()
 	end
 	PhantomGamble_Reset()
 	PhantomGamble_AcceptOnes_Button:SetText("Open Entry")
+	PhantomGamble_AcceptOnes_Button:Enable()
+	PhantomGamble_ROLL_Button:Disable()
+	PhantomGamble_LASTCALL_Button:Disable()
 	PhantomGamble_CHAT_Button:Enable()
 end
 
