@@ -655,8 +655,8 @@ local function CreateMainFrame()
 	drStartBtnBg:SetTexture(0.1, 0.1, 0.1, 0.8)
 	drStartBtnBg:SetAllPoints(drStartBtn_Select)
 	
-	local drStartBtnText = drStartBtn_Select:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	drStartBtnText:SetPoint("CENTER", drStartBtn_Select, "CENTER", 0, 0)
+	local drStartBtnText = drStartBtn_Select:CreateFontString("PhantomGamble_DR_StartSelectText", "OVERLAY", "GameFontHighlightSmall")
+	drStartBtnText:SetPoint("CENTER", drStartBtn_Select, "CENTER", -5, 0)
 	drStartBtnText:SetText("100")
 	
 	local drStartBtnArrow = drStartBtn_Select:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -694,24 +694,27 @@ local function CreateMainFrame()
 		local optText = optBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 		optText:SetPoint("CENTER", optBtn, "CENTER", 0, 0)
 		if val >= 10000 then
-			optText:SetText(string.format("%d,000", val/1000))
+			optText:SetText("10,000")
 		elseif val >= 1000 then
-			optText:SetText(string.format("%d,000", val/1000))
+			optText:SetText("1,000")
 		else
 			optText:SetText(tostring(val))
 		end
 		
 		optBtn:SetHighlightTexture("Interface\\Buttons\\UI-Panel-Button-Highlight")
+		optBtn.value = val
 		optBtn:SetScript("OnClick", function()
-			DR_StartNumber = val
-			if val >= 10000 then
-				drStartBtnText:SetText("10,000")
-			elseif val >= 1000 then
-				drStartBtnText:SetText("1,000")
+			DR_StartNumber = this.value
+			local displayText
+			if this.value >= 10000 then
+				displayText = "10,000"
+			elseif this.value >= 1000 then
+				displayText = "1,000"
 			else
-				drStartBtnText:SetText(tostring(val))
+				displayText = tostring(this.value)
 			end
-			PhantomGamble["lastDRStart"] = val
+			PhantomGamble_DR_StartSelectText:SetText(displayText)
+			PhantomGamble["lastDRStart"] = this.value
 			drStartDropdown:Hide()
 		end)
 		
@@ -727,22 +730,8 @@ local function CreateMainFrame()
 	end)
 	
 	-- Hide dropdown when clicking elsewhere
-	drStartDropdown:SetScript("OnShow", function()
-		this:SetScript("OnUpdate", function()
-			if not MouseIsOver(drStartDropdown) and not MouseIsOver(drStartBtn_Select) then
-				if arg1 and arg1 > 0 then
-					drStartDropdown:Hide()
-				end
-			end
-		end)
-	end)
-	drStartDropdown:SetScript("OnHide", function()
-		this:SetScript("OnUpdate", nil)
-	end)
-	
-	-- Close dropdown when mouse leaves area
 	drStartDropdown:SetScript("OnLeave", function()
-		if not MouseIsOver(drStartBtn_Select) then
+		if not MouseIsOver(drStartBtn_Select) and not MouseIsOver(drStartDropdown) then
 			drStartDropdown:Hide()
 		end
 	end)
@@ -1372,22 +1361,17 @@ function PhantomGamble_OnEvent()
 
 		PhantomGamble_EditBox:SetText(tostring(PhantomGamble["lastroll"] or 100))
 		DR_StartNumber = PhantomGamble["lastDRStart"] or 100
-		-- Update the dropdown button text
-		if PhantomGamble_DR_StartSelect then
-			local startText = tostring(DR_StartNumber)
+		-- Update dropdown display
+		if PhantomGamble_DR_StartSelectText then
+			local displayText
 			if DR_StartNumber >= 10000 then
-				startText = "10,000"
+				displayText = "10,000"
 			elseif DR_StartNumber >= 1000 then
-				startText = "1,000"
+				displayText = "1,000"
+			else
+				displayText = tostring(DR_StartNumber)
 			end
-			local btnText = PhantomGamble_DR_StartSelect:GetRegions()
-			for i = 1, PhantomGamble_DR_StartSelect:GetNumRegions() do
-				local region = select(i, PhantomGamble_DR_StartSelect:GetRegions())
-				if region and region:GetObjectType() == "FontString" and region:GetText() ~= "v" then
-					region:SetText(startText)
-					break
-				end
-			end
+			PhantomGamble_DR_StartSelectText:SetText(displayText)
 		end
 		PhantomGamble_DR_GoldEditBox:SetText(tostring(PhantomGamble["lastDRGold"] or 100))
 		chatmethod = chatmethods[PhantomGamble["chat"] or 1] or "RAID"
