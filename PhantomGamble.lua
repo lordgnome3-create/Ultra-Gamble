@@ -1,6 +1,11 @@
 -- PhantomGamble Addon for Turtle WoW (1.12 compatible)
+-- Features: Regular Gambling + Death Roll
 
--- Variables
+-- ============================================
+-- VARIABLES
+-- ============================================
+
+-- Regular gambling variables
 local AcceptOnes = "false"
 local AcceptRolls = "false"
 local totalrolls = 0
@@ -17,6 +22,16 @@ local tiehigh = 0
 local tielow = 0
 local whispermethod = false
 
+-- Death roll variables
+local DR_Active = false
+local DR_Player1 = nil
+local DR_Player2 = nil
+local DR_CurrentRoller = nil
+local DR_CurrentMax = 0
+local DR_StartAmount = 100
+local DR_AcceptingPlayers = false
+local DR_WaitingForRoll = false
+
 local chatmethods = { "RAID", "GUILD", "PARTY", "SAY" }
 local chatmethod = chatmethods[1]
 
@@ -26,7 +41,15 @@ PG_Settings = { MinimapPos = 75 }
 local sortedStats = {}
 local statsNeedUpdate = true
 
--- Helper function to send chat messages
+-- Stats window line pool
+local statsLines = {}
+local STATS_LINE_HEIGHT = 16
+local MAX_STATS_LINES = 50
+
+-- ============================================
+-- HELPER FUNCTIONS
+-- ============================================
+
 local function ChatMsg(msg, chatType, language, channel)
 	if not msg or msg == "" then return end
 	
@@ -72,7 +95,10 @@ local function Print(pre, red, text)
 	DEFAULT_CHAT_FRAME:AddMessage(pre .. "|cff00ff00" .. red .. "|r: " .. text)
 end
 
--- Sort stats for display
+-- ============================================
+-- STATS FUNCTIONS
+-- ============================================
+
 local function UpdateSortedStats()
 	sortedStats = {}
 	if not PhantomGamble or not PhantomGamble["stats"] then return end
@@ -81,12 +107,10 @@ local function UpdateSortedStats()
 		table.insert(sortedStats, { name = name, amount = amount })
 	end
 	
-	-- Sort by amount descending (winners first)
 	table.sort(sortedStats, function(a, b) return a.amount > b.amount end)
 	statsNeedUpdate = false
 end
 
--- Report stats to chat
 local function ReportStats(count, fromBottom)
 	if not PhantomGamble or not PhantomGamble["stats"] or not next(PhantomGamble["stats"]) then
 		Print("", "", "No stats to report!")
@@ -101,11 +125,9 @@ local function ReportStats(count, fromBottom)
 		return
 	end
 	
-	local startIdx, endIdx
-	local header
+	local startIdx, endIdx, header
 	
 	if fromBottom then
-		-- Bottom players (losers)
 		if count == 1 then
 			header = "Biggest Loser"
 			startIdx = total
@@ -116,7 +138,6 @@ local function ReportStats(count, fromBottom)
 			endIdx = total
 		end
 	else
-		-- Top players (winners)
 		header = "Top " .. count .. " Winners"
 		startIdx = 1
 		endIdx = math.min(count, total)
@@ -143,44 +164,19 @@ local function ReportStats(count, fromBottom)
 	end
 end
 
--- Stats window scroll frame line pool
-local statsLines = {}
-local STATS_LINE_HEIGHT = 16
-local MAX_STATS_LINES = 50
-
-local function UpdateStatsWindowLayout()
-	if not PhantomGamble_StatsFrame then return end
-	local width = PhantomGamble_StatsFrame:GetWidth()
-	
-	-- Update button widths
-	local btnWidth = math.max(40, (width - 30) / 5)
-	if PhantomGamble_StatsTop5Btn then PhantomGamble_StatsTop5Btn:SetWidth(btnWidth) end
-	if PhantomGamble_StatsTop10Btn then PhantomGamble_StatsTop10Btn:SetWidth(btnWidth) end
-	if PhantomGamble_StatsTop15Btn then PhantomGamble_StatsTop15Btn:SetWidth(btnWidth) end
-	if PhantomGamble_StatsBot5Btn then PhantomGamble_StatsBot5Btn:SetWidth(btnWidth) end
-	if PhantomGamble_StatsLastBtn then PhantomGamble_StatsLastBtn:SetWidth(btnWidth) end
-end
-
 local function RefreshStatsDisplay()
 	if not PhantomGamble_StatsFrame or not PhantomGamble_StatsFrame:IsVisible() then return end
 	if not PhantomGamble_StatsScrollChild then return end
 	
 	if statsNeedUpdate then UpdateSortedStats() end
 	
-	-- Hide all lines first
 	for i = 1, MAX_STATS_LINES do
-		if statsLines[i] then
-			statsLines[i]:Hide()
-		end
+		if statsLines[i] then statsLines[i]:Hide() end
 	end
 	
-	-- Get scroll child width
 	local childWidth = PhantomGamble_StatsScrollChild:GetWidth()
-	if not childWidth or childWidth <= 0 then
-		childWidth = 240
-	end
+	if not childWidth or childWidth <= 0 then childWidth = 240 end
 	
-	-- Show stats
 	local yOffset = 0
 	for i, entry in ipairs(sortedStats) do
 		if i > MAX_STATS_LINES then break end
@@ -199,11 +195,11 @@ local function RefreshStatsDisplay()
 		
 		local color
 		if entry.amount > 0 then
-			color = "|cff00ff00" -- Green for positive
+			color = "|cff00ff00"
 		elseif entry.amount < 0 then
-			color = "|cffff0000" -- Red for negative
+			color = "|cffff0000"
 		else
-			color = "|cffffff00" -- Yellow for zero
+			color = "|cffffff00"
 		end
 		
 		local sign = entry.amount >= 0 and "+" or ""
@@ -213,7 +209,6 @@ local function RefreshStatsDisplay()
 		yOffset = yOffset + STATS_LINE_HEIGHT
 	end
 	
-	-- If no stats, show message
 	if table.getn(sortedStats) == 0 then
 		local line = statsLines[1]
 		if not line then
@@ -228,17 +223,30 @@ local function RefreshStatsDisplay()
 		yOffset = STATS_LINE_HEIGHT
 	end
 	
-	-- Update scroll child height
 	local totalHeight = math.max(yOffset + 10, 50)
 	PhantomGamble_StatsScrollChild:SetHeight(totalHeight)
 	
-	-- Update scroll bar range
 	if PhantomGamble_StatsScrollBar then
 		local visibleHeight = PhantomGamble_StatsScrollFrame:GetHeight()
 		local maxScroll = math.max(0, totalHeight - visibleHeight)
 		PhantomGamble_StatsScrollBar:SetMinMaxValues(0, maxScroll)
 	end
 end
+
+local function UpdateStatsWindowLayout()
+	if not PhantomGamble_StatsFrame then return end
+	local width = PhantomGamble_StatsFrame:GetWidth()
+	local btnWidth = math.max(40, (width - 30) / 5)
+	if PhantomGamble_StatsTop5Btn then PhantomGamble_StatsTop5Btn:SetWidth(btnWidth) end
+	if PhantomGamble_StatsTop10Btn then PhantomGamble_StatsTop10Btn:SetWidth(btnWidth) end
+	if PhantomGamble_StatsTop15Btn then PhantomGamble_StatsTop15Btn:SetWidth(btnWidth) end
+	if PhantomGamble_StatsBot5Btn then PhantomGamble_StatsBot5Btn:SetWidth(btnWidth) end
+	if PhantomGamble_StatsLastBtn then PhantomGamble_StatsLastBtn:SetWidth(btnWidth) end
+end
+
+-- ============================================
+-- STATS WINDOW
+-- ============================================
 
 local function CreateStatsWindow()
 	local f = CreateFrame("Frame", "PhantomGamble_StatsFrame", UIParent)
@@ -252,12 +260,10 @@ local function CreateStatsWindow()
 	f:SetMinResize(250, 200)
 	f:SetMaxResize(450, 500)
 	
-	-- Background
 	local bg = f:CreateTexture(nil, "BACKGROUND")
 	bg:SetTexture(0, 0, 0, 0.85)
 	bg:SetAllPoints(f)
 	
-	-- Borders
 	local borderTop = f:CreateTexture(nil, "BORDER")
 	borderTop:SetTexture(0.6, 0.6, 0.6, 1)
 	borderTop:SetHeight(2)
@@ -282,7 +288,6 @@ local function CreateStatsWindow()
 	borderRight:SetPoint("TOPRIGHT", f, "TOPRIGHT", 0, 0)
 	borderRight:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, 0)
 	
-	-- Title bar
 	local titleBg = f:CreateTexture(nil, "ARTWORK")
 	titleBg:SetTexture(0.2, 0.2, 0.4, 1)
 	titleBg:SetHeight(24)
@@ -293,31 +298,25 @@ local function CreateStatsWindow()
 	title:SetPoint("TOP", f, "TOP", 0, -8)
 	title:SetText("|cffFFD700Gambling Stats|r")
 	
-	-- Draggable
 	f:SetScript("OnMouseDown", function()
 		if arg1 == "LeftButton" then this:StartMoving() end
 	end)
 	f:SetScript("OnMouseUp", function() this:StopMovingOrSizing() end)
 	
-	-- Close button
 	local closeBtn = CreateFrame("Button", "PhantomGamble_StatsCloseButton", f, "UIPanelCloseButton")
 	closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -2, -2)
 	closeBtn:SetScript("OnClick", function() PhantomGamble_StatsFrame:Hide() end)
 	
-	-- Scroll frame - create with explicit size
 	local scrollFrame = CreateFrame("ScrollFrame", "PhantomGamble_StatsScrollFrame", f)
 	scrollFrame:SetPoint("TOPLEFT", f, "TOPLEFT", 10, -30)
 	scrollFrame:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -30, 60)
 	scrollFrame:EnableMouseWheel(true)
 	
-	-- Scroll child - must be created and sized before setting as scroll child
 	local scrollChild = CreateFrame("Frame", "PhantomGamble_StatsScrollChild", scrollFrame)
 	scrollChild:SetWidth(240)
-	scrollChild:SetHeight(1) -- Will be updated dynamically
-	
+	scrollChild:SetHeight(1)
 	scrollFrame:SetScrollChild(scrollChild)
 	
-	-- Scroll bar
 	local scrollBar = CreateFrame("Slider", "PhantomGamble_StatsScrollBar", scrollFrame)
 	scrollBar:SetPoint("TOPLEFT", scrollFrame, "TOPRIGHT", 2, -16)
 	scrollBar:SetPoint("BOTTOMLEFT", scrollFrame, "BOTTOMRIGHT", 2, 16)
@@ -327,12 +326,10 @@ local function CreateStatsWindow()
 	scrollBar:SetValueStep(1)
 	scrollBar:SetValue(0)
 	
-	-- Scroll bar background
 	local scrollBg = scrollBar:CreateTexture(nil, "BACKGROUND")
 	scrollBg:SetAllPoints(scrollBar)
 	scrollBg:SetTexture(0, 0, 0, 0.5)
 	
-	-- Scroll bar thumb
 	local thumb = scrollBar:CreateTexture(nil, "OVERLAY")
 	thumb:SetTexture(0.5, 0.5, 0.5, 1)
 	thumb:SetWidth(14)
@@ -343,7 +340,6 @@ local function CreateStatsWindow()
 		scrollFrame:SetVerticalScroll(this:GetValue())
 	end)
 	
-	-- Mouse wheel scrolling
 	scrollFrame:SetScript("OnMouseWheel", function()
 		local current = scrollBar:GetValue()
 		local minVal, maxVal = scrollBar:GetMinMaxValues()
@@ -355,7 +351,6 @@ local function CreateStatsWindow()
 		end
 	end)
 	
-	-- Report buttons
 	local btnY = 35
 	local btnHeight = 20
 	local btnSpacing = 2
@@ -395,7 +390,6 @@ local function CreateStatsWindow()
 	lastBtn:SetText("Last")
 	lastBtn:SetScript("OnClick", function() ReportStats(1, true) end)
 	
-	-- Reset stats button
 	local resetBtn = CreateFrame("Button", "PhantomGamble_StatsResetBtn", f, "GameMenuButtonTemplate")
 	resetBtn:SetWidth(80)
 	resetBtn:SetHeight(btnHeight)
@@ -408,7 +402,6 @@ local function CreateStatsWindow()
 		Print("", "", "Stats have been reset.")
 	end)
 	
-	-- Resize grip
 	local resizeBtn = CreateFrame("Button", "PhantomGamble_StatsResizeButton", f)
 	resizeBtn:SetWidth(16)
 	resizeBtn:SetHeight(16)
@@ -436,7 +429,6 @@ local function CreateStatsWindow()
 	
 	f:SetScript("OnShow", function()
 		statsNeedUpdate = true
-		-- Delay the refresh slightly to ensure frame is fully rendered
 		this:SetScript("OnUpdate", function()
 			this:SetScript("OnUpdate", nil)
 			local scrollWidth = PhantomGamble_StatsScrollFrame:GetWidth()
@@ -451,36 +443,56 @@ local function CreateStatsWindow()
 	return f
 end
 
+-- ============================================
+-- LAYOUT UPDATE
+-- ============================================
+
 local function UpdateLayout()
 	if not PhantomGamble_Frame then return end
 	local width = PhantomGamble_Frame:GetWidth()
-	local editWidth = math.max(60, width - 80)
-	PhantomGamble_EditBox:SetWidth(editWidth)
-	local btnWidth = math.max(80, width - 60)
-	PhantomGamble_AcceptOnes_Button:SetWidth(btnWidth)
-	PhantomGamble_LASTCALL_Button:SetWidth(btnWidth)
-	PhantomGamble_ROLL_Button:SetWidth(btnWidth)
-	local bottomBtnWidth = math.max(60, (width - 50) / 2)
-	PhantomGamble_CHAT_Button:SetWidth(bottomBtnWidth)
-	PhantomGamble_WHISPER_Button:SetWidth(bottomBtnWidth)
+	local halfWidth = (width - 15) / 2
+	
+	-- Left side buttons
+	local leftBtnWidth = math.max(80, halfWidth - 20)
+	if PhantomGamble_EditBox then PhantomGamble_EditBox:SetWidth(math.max(60, leftBtnWidth - 20)) end
+	if PhantomGamble_AcceptOnes_Button then PhantomGamble_AcceptOnes_Button:SetWidth(leftBtnWidth) end
+	if PhantomGamble_LASTCALL_Button then PhantomGamble_LASTCALL_Button:SetWidth(leftBtnWidth) end
+	if PhantomGamble_ROLL_Button then PhantomGamble_ROLL_Button:SetWidth(leftBtnWidth) end
+	
+	-- Right side buttons
+	local rightBtnWidth = math.max(80, halfWidth - 20)
+	if PhantomGamble_DR_EditBox then PhantomGamble_DR_EditBox:SetWidth(math.max(60, rightBtnWidth - 20)) end
+	if PhantomGamble_DR_StartBtn then PhantomGamble_DR_StartBtn:SetWidth(rightBtnWidth) end
+	if PhantomGamble_DR_CancelBtn then PhantomGamble_DR_CancelBtn:SetWidth(rightBtnWidth) end
+	
+	-- Bottom buttons
+	local bottomBtnWidth = math.max(50, (halfWidth - 10) / 2)
+	if PhantomGamble_CHAT_Button then PhantomGamble_CHAT_Button:SetWidth(bottomBtnWidth) end
+	if PhantomGamble_WHISPER_Button then PhantomGamble_WHISPER_Button:SetWidth(bottomBtnWidth) end
 end
+
+-- ============================================
+-- MAIN FRAME CREATION
+-- ============================================
 
 local function CreateMainFrame()
 	local f = CreateFrame("Frame", "PhantomGamble_Frame", UIParent)
-	f:SetWidth(250)
-	f:SetHeight(220)
+	f:SetWidth(420)
+	f:SetHeight(250)
 	f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
 	f:SetMovable(true)
 	f:SetResizable(true)
 	f:EnableMouse(true)
 	f:SetFrameStrata("DIALOG")
-	f:SetMinResize(200, 180)
-	f:SetMaxResize(400, 350)
+	f:SetMinResize(380, 220)
+	f:SetMaxResize(600, 400)
 
+	-- Background
 	local bg = f:CreateTexture(nil, "BACKGROUND")
 	bg:SetTexture(0, 0, 0, 0.85)
 	bg:SetAllPoints(f)
 
+	-- Borders
 	local borderTop = f:CreateTexture(nil, "BORDER")
 	borderTop:SetTexture(0.6, 0.6, 0.6, 1)
 	borderTop:SetHeight(2)
@@ -505,6 +517,14 @@ local function CreateMainFrame()
 	borderRight:SetPoint("TOPRIGHT", f, "TOPRIGHT", 0, 0)
 	borderRight:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, 0)
 
+	-- Center divider
+	local divider = f:CreateTexture(nil, "BORDER")
+	divider:SetTexture(0.5, 0.5, 0.5, 1)
+	divider:SetWidth(2)
+	divider:SetPoint("TOP", f, "TOP", 0, -26)
+	divider:SetPoint("BOTTOM", f, "BOTTOM", 0, 55)
+
+	-- Title bar
 	local titleBg = f:CreateTexture(nil, "ARTWORK")
 	titleBg:SetTexture(0.2, 0.2, 0.4, 1)
 	titleBg:SetHeight(24)
@@ -536,9 +556,7 @@ local function CreateMainFrame()
 	
 	statsBtn:SetHighlightTexture("Interface\\Buttons\\UI-Panel-Button-Highlight")
 	statsBtn:SetScript("OnClick", function()
-		if not PhantomGamble_StatsFrame then
-			CreateStatsWindow()
-		end
+		if not PhantomGamble_StatsFrame then CreateStatsWindow() end
 		if PhantomGamble_StatsFrame:IsVisible() then
 			PhantomGamble_StatsFrame:Hide()
 		else
@@ -553,10 +571,23 @@ local function CreateMainFrame()
 	end)
 	statsBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
+	-- Close button
+	local closeBtn = CreateFrame("Button", "PhantomGamble_CloseButton", f, "UIPanelCloseButton")
+	closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -2, -2)
+	closeBtn:SetScript("OnClick", function() PhantomGamble_SlashCmd("hide") end)
+
+	-- ==========================================
+	-- LEFT SIDE - Regular Gambling
+	-- ==========================================
+	
+	local leftTitle = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	leftTitle:SetPoint("TOP", f, "TOPLEFT", 105, -30)
+	leftTitle:SetText("|cff00ff00Regular Gamble|r")
+
 	local editbox = CreateFrame("EditBox", "PhantomGamble_EditBox", f)
-	editbox:SetWidth(100)
-	editbox:SetHeight(28)
-	editbox:SetPoint("TOP", f, "TOP", 0, -35)
+	editbox:SetWidth(80)
+	editbox:SetHeight(24)
+	editbox:SetPoint("TOP", leftTitle, "BOTTOM", 0, -8)
 	editbox:SetFontObject(ChatFontNormal)
 	editbox:SetAutoFocus(false)
 	editbox:SetNumeric(true)
@@ -570,44 +601,90 @@ local function CreateMainFrame()
 	editBg:SetAllPoints(editbox)
 
 	local acceptBtn = CreateFrame("Button", "PhantomGamble_AcceptOnes_Button", f, "GameMenuButtonTemplate")
-	acceptBtn:SetWidth(150)
+	acceptBtn:SetWidth(120)
 	acceptBtn:SetHeight(22)
-	acceptBtn:SetPoint("TOP", editbox, "BOTTOM", 0, -10)
+	acceptBtn:SetPoint("TOP", editbox, "BOTTOM", 0, -8)
 	acceptBtn:SetText("Open Entry")
 	acceptBtn:SetScript("OnClick", function() PhantomGamble_OnClickACCEPTONES() end)
 
 	local lastcallBtn = CreateFrame("Button", "PhantomGamble_LASTCALL_Button", f, "GameMenuButtonTemplate")
-	lastcallBtn:SetWidth(150)
+	lastcallBtn:SetWidth(120)
 	lastcallBtn:SetHeight(22)
-	lastcallBtn:SetPoint("TOP", acceptBtn, "BOTTOM", 0, -5)
+	lastcallBtn:SetPoint("TOP", acceptBtn, "BOTTOM", 0, -4)
 	lastcallBtn:SetText("Last Call")
 	lastcallBtn:SetScript("OnClick", function() PhantomGamble_OnClickLASTCALL() end)
 
 	local rollBtn = CreateFrame("Button", "PhantomGamble_ROLL_Button", f, "GameMenuButtonTemplate")
-	rollBtn:SetWidth(150)
+	rollBtn:SetWidth(120)
 	rollBtn:SetHeight(22)
-	rollBtn:SetPoint("TOP", lastcallBtn, "BOTTOM", 0, -5)
+	rollBtn:SetPoint("TOP", lastcallBtn, "BOTTOM", 0, -4)
 	rollBtn:SetText("Roll")
 	rollBtn:SetScript("OnClick", function() PhantomGamble_OnClickROLL() end)
 
+	-- ==========================================
+	-- RIGHT SIDE - Death Roll
+	-- ==========================================
+	
+	local rightTitle = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	rightTitle:SetPoint("TOP", f, "TOPRIGHT", -105, -30)
+	rightTitle:SetText("|cffff0000Death Roll|r")
+
+	local drEditbox = CreateFrame("EditBox", "PhantomGamble_DR_EditBox", f)
+	drEditbox:SetWidth(80)
+	drEditbox:SetHeight(24)
+	drEditbox:SetPoint("TOP", rightTitle, "BOTTOM", 0, -8)
+	drEditbox:SetFontObject(ChatFontNormal)
+	drEditbox:SetAutoFocus(false)
+	drEditbox:SetNumeric(true)
+	drEditbox:SetMaxLetters(6)
+	drEditbox:SetJustifyH("CENTER")
+	drEditbox:SetScript("OnEscapePressed", function() this:ClearFocus() end)
+	drEditbox:SetScript("OnEnterPressed", function() this:ClearFocus() end)
+
+	local drEditBg = drEditbox:CreateTexture(nil, "BACKGROUND")
+	drEditBg:SetTexture(0.1, 0.1, 0.1, 0.8)
+	drEditBg:SetAllPoints(drEditbox)
+
+	local drStartBtn = CreateFrame("Button", "PhantomGamble_DR_StartBtn", f, "GameMenuButtonTemplate")
+	drStartBtn:SetWidth(120)
+	drStartBtn:SetHeight(22)
+	drStartBtn:SetPoint("TOP", drEditbox, "BOTTOM", 0, -8)
+	drStartBtn:SetText("Start Death Roll")
+	drStartBtn:SetScript("OnClick", function() PhantomGamble_DR_Start() end)
+
+	local drCancelBtn = CreateFrame("Button", "PhantomGamble_DR_CancelBtn", f, "GameMenuButtonTemplate")
+	drCancelBtn:SetWidth(120)
+	drCancelBtn:SetHeight(22)
+	drCancelBtn:SetPoint("TOP", drStartBtn, "BOTTOM", 0, -4)
+	drCancelBtn:SetText("Cancel")
+	drCancelBtn:SetScript("OnClick", function() PhantomGamble_DR_Cancel() end)
+	drCancelBtn:Disable()
+
+	-- Death Roll Status
+	local drStatus = f:CreateFontString("PhantomGamble_DR_Status", "OVERLAY", "GameFontNormalSmall")
+	drStatus:SetPoint("TOP", drCancelBtn, "BOTTOM", 0, -8)
+	drStatus:SetWidth(140)
+	drStatus:SetText("|cffffff00Waiting...|r")
+
+	-- ==========================================
+	-- BOTTOM - Shared Controls
+	-- ==========================================
+
 	local chatBtn = CreateFrame("Button", "PhantomGamble_CHAT_Button", f, "GameMenuButtonTemplate")
-	chatBtn:SetWidth(80)
+	chatBtn:SetWidth(70)
 	chatBtn:SetHeight(20)
-	chatBtn:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 15, 35)
+	chatBtn:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 15, 30)
 	chatBtn:SetText("RAID")
 	chatBtn:SetScript("OnClick", function() PhantomGamble_OnClickCHAT() end)
 
 	local whisperBtn = CreateFrame("Button", "PhantomGamble_WHISPER_Button", f, "GameMenuButtonTemplate")
-	whisperBtn:SetWidth(100)
+	whisperBtn:SetWidth(90)
 	whisperBtn:SetHeight(20)
-	whisperBtn:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -15, 35)
+	whisperBtn:SetPoint("LEFT", chatBtn, "RIGHT", 5, 0)
 	whisperBtn:SetText("(No Whispers)")
 	whisperBtn:SetScript("OnClick", function() PhantomGamble_OnClickWHISPERS() end)
 
-	local closeBtn = CreateFrame("Button", "PhantomGamble_CloseButton", f, "UIPanelCloseButton")
-	closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -2, -2)
-	closeBtn:SetScript("OnClick", function() PhantomGamble_SlashCmd("hide") end)
-
+	-- Resize grip
 	local resizeBtn = CreateFrame("Button", "PhantomGamble_ResizeButton", f)
 	resizeBtn:SetWidth(16)
 	resizeBtn:SetHeight(16)
@@ -622,6 +699,10 @@ local function CreateMainFrame()
 
 	return f
 end
+
+-- ============================================
+-- MINIMAP BUTTON
+-- ============================================
 
 local function CreateMinimapButton()
 	local btn = CreateFrame("Button", "PG_MinimapButton", Minimap)
@@ -697,138 +778,161 @@ function PG_MinimapButton_OnClick()
 	end
 end
 
-function PhantomGamble_SlashCmd(msg)
-	msg = string.lower(msg or "")
-	if msg == "" then
-		Print("", "", "Commands: show, hide, stats, reset, fullstats, resetstats, minimap, ban, unban, listban")
+-- ============================================
+-- DEATH ROLL FUNCTIONS
+-- ============================================
+
+function PhantomGamble_DR_Start()
+	local editText = PhantomGamble_DR_EditBox:GetText()
+	if editText == "" or not tonumber(editText) or tonumber(editText) < 2 then
+		DEFAULT_CHAT_FRAME:AddMessage("|cffff0000Please enter a valid starting number (2 or higher).|r")
 		return
 	end
-	if msg == "hide" then
-		PhantomGamble_Frame:Hide()
-		PhantomGamble["active"] = 0
-	elseif msg == "show" then
-		PhantomGamble_Frame:Show()
-		PhantomGamble["active"] = 1
-	elseif msg == "stats" then
-		if not PhantomGamble_StatsFrame then CreateStatsWindow() end
-		PhantomGamble_StatsFrame:Show()
-	elseif msg == "reset" then
-		PhantomGamble_Reset()
-		Print("", "", "PhantomGamble has been reset.")
-	elseif msg == "fullstats" then
-		PhantomGamble_OnClickSTATS(true)
-	elseif msg == "resetstats" then
-		PhantomGamble["stats"] = {}
+	
+	DR_StartAmount = tonumber(editText)
+	DR_CurrentMax = DR_StartAmount
+	DR_Active = false
+	DR_AcceptingPlayers = true
+	DR_Player1 = nil
+	DR_Player2 = nil
+	DR_WaitingForRoll = false
+	
+	ChatMsg("Death Roll for " .. DR_StartAmount .. " gold! Type 1 to join (need 2 players).")
+	
+	PhantomGamble_DR_StartBtn:SetText("Waiting...")
+	PhantomGamble_DR_StartBtn:Disable()
+	PhantomGamble_DR_CancelBtn:Enable()
+	PhantomGamble_DR_Status:SetText("|cffffff00Waiting for players...|r")
+end
+
+function PhantomGamble_DR_Cancel()
+	DR_Active = false
+	DR_AcceptingPlayers = false
+	DR_Player1 = nil
+	DR_Player2 = nil
+	DR_WaitingForRoll = false
+	DR_CurrentMax = 0
+	
+	PhantomGamble_DR_StartBtn:SetText("Start Death Roll")
+	PhantomGamble_DR_StartBtn:Enable()
+	PhantomGamble_DR_CancelBtn:Disable()
+	PhantomGamble_DR_Status:SetText("|cffffff00Cancelled|r")
+	
+	ChatMsg("Death Roll has been cancelled.")
+end
+
+function PhantomGamble_DR_AddPlayer(name)
+	if not DR_AcceptingPlayers then return end
+	
+	-- Check if already joined
+	if DR_Player1 and string.lower(DR_Player1) == string.lower(name) then return end
+	if DR_Player2 and string.lower(DR_Player2) == string.lower(name) then return end
+	
+	if not DR_Player1 then
+		DR_Player1 = name
+		Print("", "", name .. " joined Death Roll as Player 1")
+		PhantomGamble_DR_Status:SetText("|cff00ff00P1: " .. name .. "|r\n|cffffff00Waiting for P2...|r")
+		if whispermethod then
+			SendChatMessage("You joined Death Roll as Player 1!", "WHISPER", nil, name)
+		end
+	elseif not DR_Player2 then
+		DR_Player2 = name
+		Print("", "", name .. " joined Death Roll as Player 2")
+		DR_AcceptingPlayers = false
+		
+		-- Start the game
+		DR_Active = true
+		DR_CurrentRoller = DR_Player1
+		DR_WaitingForRoll = true
+		
+		PhantomGamble_DR_Status:SetText("|cff00ff00P1: " .. DR_Player1 .. "|r\n|cff00ff00P2: " .. DR_Player2 .. "|r")
+		
+		ChatMsg("Death Roll started! " .. DR_Player1 .. " vs " .. DR_Player2 .. " for " .. DR_StartAmount .. " gold!")
+		ChatMsg(DR_Player1 .. " rolls first! /random 1-" .. DR_CurrentMax)
+		
+		if whispermethod then
+			SendChatMessage("You joined Death Roll as Player 2!", "WHISPER", nil, name)
+		end
+	end
+end
+
+function PhantomGamble_DR_ParseRoll(msg)
+	if not DR_Active or not DR_WaitingForRoll then return end
+	
+	local _, _, name, roll, minroll, maxroll = string.find(msg, "(.+) rolls (%d+) %((%d+)%-(%d+)%)")
+	if not name then return end
+	
+	roll = tonumber(roll)
+	minroll = tonumber(minroll)
+	maxroll = tonumber(maxroll)
+	
+	-- Check if it's the current roller
+	if string.lower(name) ~= string.lower(DR_CurrentRoller) then return end
+	
+	-- Check roll range
+	if minroll ~= 1 or maxroll ~= DR_CurrentMax then
+		ChatMsg(name .. " rolled wrong range! Should be 1-" .. DR_CurrentMax)
+		return
+	end
+	
+	-- Check for death (rolled 1)
+	if roll == 1 then
+		-- Game over - current roller loses
+		local winner, loser
+		if string.lower(DR_CurrentRoller) == string.lower(DR_Player1) then
+			loser = DR_Player1
+			winner = DR_Player2
+		else
+			loser = DR_Player2
+			winner = DR_Player1
+		end
+		
+		winner = string.upper(string.sub(winner, 1, 1)) .. string.sub(winner, 2)
+		loser = string.upper(string.sub(loser, 1, 1)) .. string.sub(loser, 2)
+		
+		ChatMsg("DEATH! " .. loser .. " rolled a 1!")
+		ChatMsg(loser .. " owes " .. winner .. " " .. DR_StartAmount .. " gold!")
+		
+		-- Update stats
+		PhantomGamble["stats"][winner] = (PhantomGamble["stats"][winner] or 0) + DR_StartAmount
+		PhantomGamble["stats"][loser] = (PhantomGamble["stats"][loser] or 0) - DR_StartAmount
 		statsNeedUpdate = true
-		Print("", "", "Stats have been reset.")
-	elseif msg == "minimap" then
-		PhantomGamble["minimap"] = not PhantomGamble["minimap"]
-		if PhantomGamble["minimap"] then PG_MinimapButton:Show() else PG_MinimapButton:Hide() end
-	elseif string.sub(msg, 1, 4) == "ban " then
-		local name = string.sub(msg, 5)
-		if not PhantomGamble.bans then PhantomGamble.bans = {} end
-		table.insert(PhantomGamble.bans, name)
-		Print("", "", name .. " banned.")
-	elseif string.sub(msg, 1, 6) == "unban " then
-		local name = string.sub(msg, 7)
-		if PhantomGamble.bans then
-			for i, v in ipairs(PhantomGamble.bans) do
-				if string.lower(v) == string.lower(name) then
-					table.remove(PhantomGamble.bans, i)
-					Print("", "", name .. " unbanned.")
-					return
-				end
-			end
+		
+		if PhantomGamble_StatsFrame and PhantomGamble_StatsFrame:IsVisible() then
+			RefreshStatsDisplay()
 		end
-	elseif msg == "listban" then
-		if not PhantomGamble.bans or table.getn(PhantomGamble.bans) == 0 then
-			Print("", "", "No bans.")
-		else
-			for i, v in ipairs(PhantomGamble.bans) do
-				DEFAULT_CHAT_FRAME:AddMessage("  " .. v)
-			end
-		end
+		
+		-- Reset
+		DR_Active = false
+		DR_WaitingForRoll = false
+		DR_Player1 = nil
+		DR_Player2 = nil
+		
+		PhantomGamble_DR_StartBtn:SetText("Start Death Roll")
+		PhantomGamble_DR_StartBtn:Enable()
+		PhantomGamble_DR_CancelBtn:Disable()
+		PhantomGamble_DR_Status:SetText("|cff00ff00" .. winner .. " wins!|r")
+		return
+	end
+	
+	-- Continue game - update max and switch roller
+	DR_CurrentMax = roll
+	
+	if string.lower(DR_CurrentRoller) == string.lower(DR_Player1) then
+		DR_CurrentRoller = DR_Player2
 	else
-		Print("", "", "Unknown command: " .. msg)
+		DR_CurrentRoller = DR_Player1
 	end
+	
+	ChatMsg(name .. " rolled " .. roll .. ". " .. DR_CurrentRoller .. "'s turn! /random 1-" .. DR_CurrentMax)
+	PhantomGamble_DR_Status:SetText("|cffffff00" .. DR_CurrentRoller .. "'s turn|r\n|cffffff00Roll 1-" .. DR_CurrentMax .. "|r")
 end
 
-SLASH_PHANTOMGAMBLE1 = "/phantomgamble"
-SLASH_PHANTOMGAMBLE2 = "/pg"
-SlashCmdList["PHANTOMGAMBLE"] = PhantomGamble_SlashCmd
-
-function PhantomGamble_OnEvent()
-	if event == "PLAYER_ENTERING_WORLD" then
-		if not PhantomGamble_Frame then CreateMainFrame() end
-		if not PG_MinimapButton then CreateMinimapButton() end
-
-		if not PhantomGamble then
-			PhantomGamble = {
-				active = 1, chat = 1, channel = "gambling", whispers = false,
-				strings = {}, lowtie = {}, hightie = {}, bans = {},
-				minimap = true, lastroll = 100, stats = {}, joinstats = {}
-			}
-		end
-
-		PhantomGamble_EditBox:SetText(tostring(PhantomGamble["lastroll"] or 100))
-		chatmethod = chatmethods[PhantomGamble["chat"] or 1] or "RAID"
-		PhantomGamble_CHAT_Button:SetText(chatmethod)
-
-		if PhantomGamble["minimap"] then PG_MinimapButton:Show() else PG_MinimapButton:Hide() end
-		whispermethod = PhantomGamble["whispers"] or false
-		PhantomGamble_WHISPER_Button:SetText(whispermethod and "(Whispers)" or "(No Whispers)")
-
-		if PhantomGamble["active"] == 1 then PhantomGamble_Frame:Show() else PhantomGamble_Frame:Hide() end
-		DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00PhantomGamble loaded!|r Type |cffFFD700/pg|r for commands.")
-	end
-
-	if (event == "CHAT_MSG_RAID_LEADER" or event == "CHAT_MSG_RAID") and AcceptOnes == "true" and PhantomGamble["chat"] == 1 then
-		PhantomGamble_ParseChatMsg(arg1, arg2)
-	end
-	if event == "CHAT_MSG_GUILD" and AcceptOnes == "true" and PhantomGamble["chat"] == 2 then
-		PhantomGamble_ParseChatMsg(arg1, arg2)
-	end
-	if event == "CHAT_MSG_PARTY" and AcceptOnes == "true" and PhantomGamble["chat"] == 3 then
-		PhantomGamble_ParseChatMsg(arg1, arg2)
-	end
-	if event == "CHAT_MSG_SAY" and AcceptOnes == "true" and PhantomGamble["chat"] == 4 then
-		PhantomGamble_ParseChatMsg(arg1, arg2)
-	end
-	if event == "CHAT_MSG_SYSTEM" and AcceptRolls == "true" then
-		PhantomGamble_ParseRoll(tostring(arg1))
-	end
-end
-
-function PhantomGamble_ParseChatMsg(msg, sender)
-	if msg == "1" then
-		if PhantomGamble_ChkBan(sender) == 0 then
-			PhantomGamble_Add(sender)
-			if totalrolls >= 2 then
-				PhantomGamble_AcceptOnes_Button:Disable()
-			end
-		else
-			ChatMsg("Sorry, you're banned!")
-		end
-	elseif msg == "-1" then
-		PhantomGamble_Remove(sender)
-	end
-end
-
-function PhantomGamble_OnClickCHAT()
-	PhantomGamble["chat"] = (PhantomGamble["chat"] or 1) + 1
-	if PhantomGamble["chat"] > 4 then PhantomGamble["chat"] = 1 end
-	chatmethod = chatmethods[PhantomGamble["chat"]]
-	PhantomGamble_CHAT_Button:SetText(chatmethod)
-end
-
-function PhantomGamble_OnClickWHISPERS()
-	PhantomGamble["whispers"] = not PhantomGamble["whispers"]
-	whispermethod = PhantomGamble["whispers"]
-	PhantomGamble_WHISPER_Button:SetText(whispermethod and "(Whispers)" or "(No Whispers)")
-end
+-- ============================================
+-- REGULAR GAMBLING FUNCTIONS
+-- ============================================
 
 function PhantomGamble_OnClickACCEPTONES()
-	-- If button says "New Game", reset everything first
 	if PhantomGamble_AcceptOnes_Button:GetText() == "New Game" then
 		PhantomGamble_Reset()
 		PhantomGamble_AcceptOnes_Button:SetText("Open Entry")
@@ -869,6 +973,19 @@ function PhantomGamble_OnClickROLL()
 	elseif AcceptOnes == "true" then
 		ChatMsg("Not enough Players!")
 	end
+end
+
+function PhantomGamble_OnClickCHAT()
+	PhantomGamble["chat"] = (PhantomGamble["chat"] or 1) + 1
+	if PhantomGamble["chat"] > 4 then PhantomGamble["chat"] = 1 end
+	chatmethod = chatmethods[PhantomGamble["chat"]]
+	PhantomGamble_CHAT_Button:SetText(chatmethod)
+end
+
+function PhantomGamble_OnClickWHISPERS()
+	PhantomGamble["whispers"] = not PhantomGamble["whispers"]
+	whispermethod = PhantomGamble["whispers"]
+	PhantomGamble_WHISPER_Button:SetText(whispermethod and "(Whispers)" or "(No Whispers)")
 end
 
 function PhantomGamble_OnClickSTATS(full)
@@ -990,6 +1107,160 @@ function PhantomGamble_ParseRoll(msg)
 	Print("", "", name .. " rolled " .. roll .. ". Waiting: " .. totalrolls)
 	if totalrolls == 0 then PhantomGamble_Report() end
 end
+
+-- ============================================
+-- CHAT MESSAGE PARSING
+-- ============================================
+
+function PhantomGamble_ParseChatMsg(msg, sender)
+	-- Check for Death Roll join
+	if msg == "1" and DR_AcceptingPlayers then
+		PhantomGamble_DR_AddPlayer(sender)
+		return
+	end
+	
+	-- Regular gambling
+	if msg == "1" and AcceptOnes == "true" then
+		if PhantomGamble_ChkBan(sender) == 0 then
+			PhantomGamble_Add(sender)
+			if totalrolls >= 2 then
+				PhantomGamble_AcceptOnes_Button:Disable()
+			end
+		else
+			ChatMsg("Sorry, you're banned!")
+		end
+	elseif msg == "-1" and AcceptOnes == "true" then
+		PhantomGamble_Remove(sender)
+	end
+end
+
+-- ============================================
+-- SLASH COMMANDS
+-- ============================================
+
+function PhantomGamble_SlashCmd(msg)
+	msg = string.lower(msg or "")
+	if msg == "" then
+		Print("", "", "Commands: show, hide, stats, reset, fullstats, resetstats, minimap, ban, unban, listban")
+		return
+	end
+	if msg == "hide" then
+		PhantomGamble_Frame:Hide()
+		PhantomGamble["active"] = 0
+	elseif msg == "show" then
+		PhantomGamble_Frame:Show()
+		PhantomGamble["active"] = 1
+	elseif msg == "stats" then
+		if not PhantomGamble_StatsFrame then CreateStatsWindow() end
+		PhantomGamble_StatsFrame:Show()
+	elseif msg == "reset" then
+		PhantomGamble_Reset()
+		PhantomGamble_DR_Cancel()
+		Print("", "", "PhantomGamble has been reset.")
+	elseif msg == "fullstats" then
+		PhantomGamble_OnClickSTATS(true)
+	elseif msg == "resetstats" then
+		PhantomGamble["stats"] = {}
+		statsNeedUpdate = true
+		Print("", "", "Stats have been reset.")
+	elseif msg == "minimap" then
+		PhantomGamble["minimap"] = not PhantomGamble["minimap"]
+		if PhantomGamble["minimap"] then PG_MinimapButton:Show() else PG_MinimapButton:Hide() end
+	elseif string.sub(msg, 1, 4) == "ban " then
+		local name = string.sub(msg, 5)
+		if not PhantomGamble.bans then PhantomGamble.bans = {} end
+		table.insert(PhantomGamble.bans, name)
+		Print("", "", name .. " banned.")
+	elseif string.sub(msg, 1, 6) == "unban " then
+		local name = string.sub(msg, 7)
+		if PhantomGamble.bans then
+			for i, v in ipairs(PhantomGamble.bans) do
+				if string.lower(v) == string.lower(name) then
+					table.remove(PhantomGamble.bans, i)
+					Print("", "", name .. " unbanned.")
+					return
+				end
+			end
+		end
+	elseif msg == "listban" then
+		if not PhantomGamble.bans or table.getn(PhantomGamble.bans) == 0 then
+			Print("", "", "No bans.")
+		else
+			for i, v in ipairs(PhantomGamble.bans) do
+				DEFAULT_CHAT_FRAME:AddMessage("  " .. v)
+			end
+		end
+	else
+		Print("", "", "Unknown command: " .. msg)
+	end
+end
+
+SLASH_PHANTOMGAMBLE1 = "/phantomgamble"
+SLASH_PHANTOMGAMBLE2 = "/pg"
+SlashCmdList["PHANTOMGAMBLE"] = PhantomGamble_SlashCmd
+
+-- ============================================
+-- EVENT HANDLING
+-- ============================================
+
+function PhantomGamble_OnEvent()
+	if event == "PLAYER_ENTERING_WORLD" then
+		if not PhantomGamble_Frame then CreateMainFrame() end
+		if not PG_MinimapButton then CreateMinimapButton() end
+
+		if not PhantomGamble then
+			PhantomGamble = {
+				active = 1, chat = 1, channel = "gambling", whispers = false,
+				strings = {}, lowtie = {}, hightie = {}, bans = {},
+				minimap = true, lastroll = 100, stats = {}, joinstats = {}
+			}
+		end
+
+		PhantomGamble_EditBox:SetText(tostring(PhantomGamble["lastroll"] or 100))
+		PhantomGamble_DR_EditBox:SetText(tostring(PhantomGamble["lastroll"] or 100))
+		chatmethod = chatmethods[PhantomGamble["chat"] or 1] or "RAID"
+		PhantomGamble_CHAT_Button:SetText(chatmethod)
+
+		if PhantomGamble["minimap"] then PG_MinimapButton:Show() else PG_MinimapButton:Hide() end
+		whispermethod = PhantomGamble["whispers"] or false
+		PhantomGamble_WHISPER_Button:SetText(whispermethod and "(Whispers)" or "(No Whispers)")
+
+		if PhantomGamble["active"] == 1 then PhantomGamble_Frame:Show() else PhantomGamble_Frame:Hide() end
+		DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00PhantomGamble loaded!|r Type |cffFFD700/pg|r for commands.")
+	end
+
+	-- Chat message handling for both game modes
+	local chatEvent = false
+	if (event == "CHAT_MSG_RAID_LEADER" or event == "CHAT_MSG_RAID") and PhantomGamble["chat"] == 1 then
+		chatEvent = true
+	elseif event == "CHAT_MSG_GUILD" and PhantomGamble["chat"] == 2 then
+		chatEvent = true
+	elseif event == "CHAT_MSG_PARTY" and PhantomGamble["chat"] == 3 then
+		chatEvent = true
+	elseif event == "CHAT_MSG_SAY" and PhantomGamble["chat"] == 4 then
+		chatEvent = true
+	end
+	
+	if chatEvent then
+		PhantomGamble_ParseChatMsg(arg1, arg2)
+	end
+	
+	-- System message (roll) handling
+	if event == "CHAT_MSG_SYSTEM" then
+		-- Check for death roll first
+		if DR_Active then
+			PhantomGamble_DR_ParseRoll(tostring(arg1))
+		end
+		-- Then check regular gambling
+		if AcceptRolls == "true" then
+			PhantomGamble_ParseRoll(tostring(arg1))
+		end
+	end
+end
+
+-- ============================================
+-- EVENT FRAME REGISTRATION
+-- ============================================
 
 local PhantomGamble_EventFrame = CreateFrame("Frame", "PhantomGamble_EventFrame", UIParent)
 PhantomGamble_EventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
